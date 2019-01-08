@@ -92,7 +92,7 @@
 <meta property="og:site_name" content="MOCA">
 <meta property="og:description" content="背景记得很早之前学习c++11 API的时候，遇到过1个接口std::rotate，当时不太能理解为什么要把容器整体移动一位，总觉得这种接口没有什么实际价值（事实上这个接口实现太通用，做了o(n)的移动操作，导致可用性降低）。
 最近在工作中遇到个任务队列设计，要求从队列中取出任务对象，但是不要立即清除该对象在队列中的位置。由上层业务决定（上层会判断该任务是否需要等待，如果不等待才需要清除，否则仍旧">
-<meta property="og:updated_time" content="2019-01-08T16:47:44.000Z">
+<meta property="og:updated_time" content="2019-01-08T17:02:52.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="延迟清除队列与rotate">
 <meta name="twitter:description" content="背景记得很早之前学习c++11 API的时候，遇到过1个接口std::rotate，当时不太能理解为什么要把容器整体移动一位，总觉得这种接口没有什么实际价值（事实上这个接口实现太通用，做了o(n)的移动操作，导致可用性降低）。
@@ -400,14 +400,15 @@
 <li>可以独立为1个管理对象，同时在push频率显著低于 <code>get -&gt; remove</code>时具有接近于IterQueue的性能。</li>
 <li>但是对上层传入的对象有约束。要求对象的value不能相同，否则存在误删除问题。</li>
 </ul>
-<div id="sequence-0"></div>
-
-<p><script src="https://cdnjs.cloudflare.com/ajax/libs/webfont/1.6.27/webfontloader.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/snap.svg/0.4.1/snap.svg-min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.8.3/underscore-min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/js-sequence-diagrams/1.0.6/sequence-diagram-min.js"></script><textarea id="sequence-0-code" style="display: none">Thread1 ->> RotateQueue: get obj(value = 0x7fxxxxxx)
+<p><div id="sequence-0"></div></p>
+<p><div id="flowchart-0" class="flow-chart"></div></p>
+<p><script src="https://cdnjs.cloudflare.com/ajax/libs/raphael/2.2.7/raphael.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/flowchart/1.6.5/flowchart.min.js"></script><textarea id="flowchart-0-code" style="display: none">
+</textarea><textarea id="flowchart-0-options" style="display: none">{"theme":"simple","scale":1,"line-width":2,"line-length":50,"text-margin":10,"font-size":12}</textarea><script>  var code = document.getElementById("flowchart-0-code").value;  var options = JSON.parse(decodeURIComponent(document.getElementById("flowchart-0-options").value));  var diagram = flowchart.parse(code);  diagram.drawSVG("flowchart-0", options);</script><script src="https://cdnjs.cloudflare.com/ajax/libs/webfont/1.6.27/webfontloader.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/snap.svg/0.4.1/snap.svg-min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.8.3/underscore-min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/js-sequence-diagrams/1.0.6/sequence-diagram-min.js"></script><textarea id="sequence-0-code" style="display: none">Thread1 ->> RotateQueue: get obj(value = 0x7fxxxxxx)
 Thread2 ->> RotateQueue: get obj(value = 0x7fxxxxxx)
 Thread1 ->> RotateQueue: remove obj(value = 0x7fxxxxxx)
 Thread1 ->> RotateQueue: push new obj(value = 0x7fxxxxxx)
 Thread2 -->> RotateQueue: remove obj(value = 0x7fxxxxxx)
-Note left of Thread2 : the new pushed obj\nis unexpected removed!</textarea><textarea id="sequence-0-options" style="display: none">{"scale":1,"line-width":2,"line-length":50,"text-margin":10,"font-size":12,"theme":"simple"}</textarea><script>  var code = document.getElementById("sequence-0-code").value;  var options = JSON.parse(decodeURIComponent(document.getElementById("sequence-0-options").value));  var diagram = Diagram.parse(code);  diagram.drawSVG("sequence-0", options);</script></p>
+Note left of Thread2 : the new pushed obj\nis unexpected removed!</textarea><textarea id="sequence-0-options" style="display: none">{"theme":"simple","scale":1,"line-width":2,"line-length":50,"text-margin":10,"font-size":12}</textarea><script>  var code = document.getElementById("sequence-0-code").value;  var options = JSON.parse(decodeURIComponent(document.getElementById("sequence-0-options").value));  var diagram = Diagram.parse(code);  diagram.drawSVG("sequence-0", options);</script></p>
 
       
     </div>
