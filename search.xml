@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<search>
+  
+  
+    
+    <entry>
+      <title><![CDATA[延迟清除队列与rotate]]></title>
+      <url>http://yoursite.com/2019/01/08/%E5%BB%B6%E8%BF%9F%E6%B8%85%E9%99%A4%E9%98%9F%E5%88%97%E4%B8%8Erotate/</url>
+      <content type="html"><![CDATA[<h2 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h2><p>记得很早之前学习c++11 API的时候，遇到过1个接口<a href="!https://zh.cppreference.com/w/cpp/algorithm/rotate">std::rotate</a>，当时不太能理解为什么要把容器整体移动一位，总觉得这种接口没有什么实际价值（事实上这个接口实现太通用，做了o(n)的移动操作，导致可用性降低）。</p>
+<p>最近在工作中遇到个任务队列设计，要求从队列中取出任务对象，但是不要立即清除该对象在队列中的位置。由上层业务决定（上层会判断该任务是否需要等待，如果不等待才需要清除，否则仍旧保留在队列中。</p>
+<p>综合一下诉求如下：</p>
+<ol>
+<li>提供获取任务的get接口，但是不立即从队列中清除；</li>
+<li>每次调用get接口都能获取下一个任务；</li>
+<li>上层执行任务后判断是否需要remove任务；</li>
+<li>上述操作性能不能太差；</li>
+</ol>
+<h2 id="第一印象："><a href="#第一印象：" class="headerlink" title="第一印象："></a>第一印象：</h2><p>这里不区分deque、list等容器的差异，线性容器统一使用list讨论设计方案。</p>
+<p>第一反应，能想到的就是使用list，或者unoredered_map。<br>但为了追求高性能同时不想扩大存储内存，因而选择利用list的iterator，因为iter在新增、删除非本iter时不会失效。为了简单，我们让代码中的get接口直接返回iter（这里是为了示例，不对iter做封装）。</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">using</span> Lock = <span class="built_in">std</span>::lock_guard&lt;<span class="built_in">std</span>::mutex&gt;;</div><div class="line"><span class="keyword">template</span>&lt;<span class="keyword">typename</span> F&gt; <span class="keyword">class</span> IterQueue &#123;</div><div class="line">    <span class="built_in">std</span>::<span class="built_in">list</span>&lt;F&gt; l_ ;</div><div class="line">    <span class="built_in">std</span>::mutex mtx_ ;</div><div class="line">    <span class="keyword">typename</span> <span class="built_in">std</span>::<span class="built_in">list</span>&lt;F&gt;::iterator pos;</div><div class="line"><span class="keyword">public</span>:</div><div class="line">    IterQueue():pos(<span class="number">1</span>_.end())&#123;&#125;</div><div class="line">    </div><div class="line">    <span class="function"><span class="keyword">void</span> <span class="title">push</span><span class="params">(F&amp;&amp; fu)</span> </span>&#123; <span class="function">Lock <span class="title">Lock</span><span class="params">(mtx_)</span></span>; <span class="number">1</span>_.empLace_back(<span class="built_in">std</span>::forward&lt;F&gt;(fu)); &#125;</div><div class="line"></div><div class="line">    <span class="keyword">typename</span> <span class="built_in">std</span>::<span class="built_in">list</span>&lt;F&gt;::<span class="function">iterator <span class="title">get</span><span class="params">()</span> </span>&#123;</div><div class="line">        <span class="function">Lock <span class="title">Lock</span><span class="params">(mtx_)</span></span>;</div><div class="line">        <span class="comment">/*省略1_为空场景处理*/</span></div><div class="line">        <span class="keyword">if</span> (pos == <span class="number">1</span>_.end()) &#123;</div><div class="line">            pos = <span class="number">1</span>_.begin();</div><div class="line">        &#125;</div><div class="line">        <span class="keyword">return</span> pos++;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="function"><span class="keyword">void</span> <span class="title">remove</span><span class="params">( <span class="keyword">typename</span> <span class="built_in">std</span>::<span class="built_in">list</span>&lt;F&gt;::iterator it)</span> </span>&#123;</div><div class="line">        <span class="function">Lock <span class="title">Lock</span><span class="params">(mtx_)</span></span>;</div><div class="line">        <span class="keyword">if</span> (pos == it) pos = <span class="number">1</span>_.erase(it);</div><div class="line">        <span class="keyword">else</span> <span class="number">1</span>_.erase(it);</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>这种方案的优点很明显，返回iter，如果上层要删除，传回iter，erase的性能是o(1)的。<br>其缺点同样也是显而易见：</p>
+<ul>
+<li>iter对外暴露（虽然可以进一步封装掉，也只是暴露的程度有别）;</li>
+<li>同时对多线程的并发操作有约束，不能并发erase，否则可能会导致其它线程获取的iter失效。<strong>这里之所以是可能，因为其它线程持有的iter不是erase的那个就不会失效</strong>；</li>
+</ul>
+<h2 id="再想一想"><a href="#再想一想" class="headerlink" title="再想一想"></a>再想一想</h2><p>上述方案使用iter其实有2个原因：</p>
+<ul>
+<li>变更pos_，使得每次get都能获取到下一个；</li>
+<li>remove时不需要遍历，性能o(1)；</li>
+</ul>
+<p>针对这2个因素，同样也可以考虑利用rotate特性来实现，源码如下</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">using</span> Lock = <span class="built_in">std</span>::lock_guard&lt;<span class="built_in">std</span>::mutex&gt;;</div><div class="line"><span class="keyword">template</span>&lt;<span class="keyword">typename</span> F&gt; <span class="keyword">class</span> RotateQueue &#123;</div><div class="line">    <span class="built_in">std</span>::<span class="built_in">list</span>&lt;F&gt; l_ ;</div><div class="line">    <span class="built_in">std</span>::mutex mtx_ ;</div><div class="line"><span class="keyword">public</span>:</div><div class="line">    <span class="function"><span class="keyword">void</span> <span class="title">push</span><span class="params">(F&amp;&amp; fu)</span> </span>&#123; <span class="function">Lock <span class="title">Lock</span><span class="params">(mtx_)</span></span>; <span class="number">1</span>_.emplace_front( <span class="built_in">std</span>::forward&lt;F&gt;(fu)); &#125;</div><div class="line"></div><div class="line">    <span class="function">F <span class="title">get</span><span class="params">()</span> </span>&#123;</div><div class="line">        <span class="function">Lock <span class="title">Lock</span><span class="params">(mtx_ )</span></span>;</div><div class="line">        <span class="number">1</span>_.empLace_front(<span class="built_in">std</span>::move(<span class="number">1</span>_.back()));</div><div class="line">        <span class="number">1</span>_.pop_back();</div><div class="line">        <span class="keyword">return</span> l_.front();</div><div class="line">    &#125;</div><div class="line">    </div><div class="line">    <span class="function"><span class="keyword">void</span> <span class="title">remove</span><span class="params">(<span class="keyword">const</span> F&amp; fu)</span> </span>&#123;</div><div class="line">        <span class="function">Lock <span class="title">Lock</span><span class="params">(mtx_ )</span></span>;</div><div class="line">        <span class="keyword">for</span>(<span class="keyword">auto</span> i = l_.begin(); i != l_.end(); ++i) &#123;</div><div class="line">            <span class="keyword">if</span> (fu == *i) &#123;</div><div class="line">                l_.erase(i);</div><div class="line">                <span class="keyword">break</span>;</div><div class="line">            &#125;</div><div class="line">        &#125;</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>这样实现的优点很明显，不会暴露细节（iter）。<br>在get的时候，我们做了1次rotate，把list的back对象move到了front，并同时返回这个新front对象；<br>当上层remove这个对象的时候，因为是从begin开始的，这样就极大提升了找到的命中率。<br>当然这个性能提升也不是完美的，可以想象：</p>
+<ul>
+<li>当上层单线程调用get/remove时，或者多线程，但是push的频率足够慢（慢于get –&gt; remove的时间）时，remove的性能等价于o(1）;</li>
+<li>但当上层多线程且push频率较高时，remove性能仍然趋向o(n)；</li>
+</ul>
+<h2 id="综合来看"><a href="#综合来看" class="headerlink" title="综合来看"></a>综合来看</h2><h3 id="IterQueue："><a href="#IterQueue：" class="headerlink" title="IterQueue："></a>IterQueue：</h3><ul>
+<li>更适合把实现嵌到上层代码中，这样iter可以作为上层对象的私有成员访问。</li>
+<li>其次上层应用可以根据实际是否会存在多线程并发iter，进一步优化代码，做好保护。</li>
+</ul>
+<h3 id="RotateQueue"><a href="#RotateQueue" class="headerlink" title="RotateQueue"></a>RotateQueue</h3><ul>
+<li>可以独立为1个管理对象，同时在push频率显著低于 <code>get -&gt; remove</code>时具有接近于IterQueue的性能。</li>
+<li>但是对上层传入的对象有约束。要求对象的value不能相同，否则存在误删除问题。</li>
+</ul>
+<div id="sequence-0"></div>
+
+<p><script src="https://cdnjs.cloudflare.com/ajax/libs/webfont/1.6.27/webfontloader.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/snap.svg/0.4.1/snap.svg-min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.8.3/underscore-min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/js-sequence-diagrams/1.0.6/sequence-diagram-min.js"></script><textarea id="sequence-0-code" style="display: none">Thread1 ->> RotateQueue: get obj(value = 0x7fxxxxxx)
+Thread2 ->> RotateQueue: get obj(value = 0x7fxxxxxx)
+Thread1 ->> RotateQueue: remove obj(value = 0x7fxxxxxx)
+Thread1 ->> RotateQueue: push new obj(value = 0x7fxxxxxx)
+Thread2 -->> RotateQueue: remove obj(value = 0x7fxxxxxx)
+Note left of Thread2 : the new pushed obj\nis unexpected removed!</textarea><textarea id="sequence-0-options" style="display: none">{"scale":1,"line-width":2,"line-length":50,"text-margin":10,"font-size":12,"theme":"simple"}</textarea><script>  var code = document.getElementById("sequence-0-code").value;  var options = JSON.parse(decodeURIComponent(document.getElementById("sequence-0-options").value));  var diagram = Diagram.parse(code);  diagram.drawSVG("sequence-0", options);</script></p>
+]]></content>
+    </entry>
+    
+    <entry>
+      <title><![CDATA[test-sequence]]></title>
+      <url>http://yoursite.com/2019/01/05/test-sequence/</url>
+      <content type="html"><![CDATA[<div id="sequence-0"></div>
+
+<div id="flowchart-0" class="flow-chart"></div>
+
+
+<p><script src="https://cdnjs.cloudflare.com/ajax/libs/webfont/1.6.27/webfontloader.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/snap.svg/0.4.1/snap.svg-min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.8.3/underscore-min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/js-sequence-diagrams/1.0.6/sequence-diagram-min.js"></script><textarea id="sequence-0-code" style="display: none">Alice->Bob: Hello Bob, how are you?
+Note right of Bob: Bob thinks
+Bob-->Alice: I am good thanks!</textarea><textarea id="sequence-0-options" style="display: none">{"scale":1,"line-width":2,"line-length":50,"text-margin":10,"font-size":12,"theme":"simple"}</textarea><script>  var code = document.getElementById("sequence-0-code").value;  var options = JSON.parse(decodeURIComponent(document.getElementById("sequence-0-options").value));  var diagram = Diagram.parse(code);  diagram.drawSVG("sequence-0", options);</script><script src="https://cdnjs.cloudflare.com/ajax/libs/raphael/2.2.7/raphael.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/flowchart/1.6.5/flowchart.min.js"></script><textarea id="flowchart-0-code" style="display: none">st=>start: Start|past:>http://www.google.com[blank]
+e=>end: End:>http://www.google.com
+op1=>operation: My Operation|past
+op2=>operation: Stuff|current
+sub1=>subroutine: My Subroutine|invalid
+cond=>condition: Yes
+or No?|approved:>http://www.google.com
+c2=>condition: Good idea|rejected
+io=>inputoutput: catch something...|request
+
+st->op1(right)->cond
+cond(yes, right)->c2
+cond(no)->sub1(left)->op1
+c2(yes)->io->e
+c2(no)->op2->e</textarea><textarea id="flowchart-0-options" style="display: none">{"scale":1,"line-width":2,"line-length":50,"text-margin":10,"font-size":12,"theme":"simple"}</textarea><script>  var code = document.getElementById("flowchart-0-code").value;  var options = JSON.parse(decodeURIComponent(document.getElementById("flowchart-0-options").value));  var diagram = flowchart.parse(code);  diagram.drawSVG("flowchart-0", options);</script></p>
+]]></content>
+    </entry>
+    
+    <entry>
+      <title><![CDATA[今天兴起，测了测养龟的水质]]></title>
+      <url>http://yoursite.com/2012/08/13/20120813-%E4%BB%8A%E5%A4%A9%E5%85%B4%E8%B5%B7%E6%B5%8B%E4%BA%86%E6%B5%8B%E5%85%BB%E9%BE%9F%E7%9A%84%E6%B0%B4%E8%B4%A8/</url>
+      <content type="html"><![CDATA[<p>龟龟搬家一个多月了，也换了整理箱来养龟。<br>过滤还是用的AA360，全棉。<br>（什么？要环？扯吧，全棉一样顶呱呱。）<br>先上一张先。<br><img src="/2012/08/13/20120813-今天兴起测了测养龟的水质/20120813-1.jpg" alt=""></p>
+<p>一看拍照了，全出来了。以为要吃东西。我喂食很规律的，每天早上8点。<br><img src="/2012/08/13/20120813-今天兴起测了测养龟的水质/20120813-2.jpg" alt=""><br><img src="/2012/08/13/20120813-今天兴起测了测养龟的水质/20120813-3.jpg" alt=""></p>
+<p>养龟的水体不能笑，不然水质很难维持，之前用小缸养的时候深有体会。<br>为了避免重蹈覆辙，这次水位加深到19cm，毕竟夏天嘛，需要的。<br>啥？晒台？大热天谁谁谁晒太阳了？<br>除了房间开空调的时候，平时龟龟都待水里。<br>当然陆地还是需要的，有了陆地，龟龟不易腐皮了。<br><img src="/2012/08/13/20120813-今天兴起测了测养龟的水质/20120813-4.jpg" alt=""></p>
+<p>别看陆地很小，之前做的陆地是很大的，比整理箱还大。<br>但是大也没用，龟龟从来不去，顶多就是在水边的滤棉下面打个盹。<br>今天心血来潮，测了测水质，pH忘了拍照了一刚。<br>pH有6.5，必须的都养了1个月了老水了。<br>自来水是7.2左右。<br>NH3（左边），约0.25 ppm，必然的，龟龟的便便不是每天都抽的，一般也就是2~3天抽一次。<br>这里插一句，不要指望滤桶抽便便，就算真抽了，对滤桶的负荷也是很大的。<br>NO2（中间），最关键的一项，接近0 ppm，说明滤桶中全棉的生化过滤还是刚刚的。<br>NO3（右边），My God，达到40 ppm左右，哎，看来需要加强换水了，不然也忒高了点吧。<br><img src="/2012/08/13/20120813-今天兴起测了测养龟的水质/20120813-5.jpg" alt=""></p>
+<p>经历了一年多的养龟养鱼，才发现，其实养龟不需要太过追求什么过滤什么玻璃环。<br>养鱼，追求水质的同时还要求水质稳定。<br>而对于龟，放个过滤桶，放块过滤棉，然后全生化棉，就基本可以保证水质问题。<br>千万不要用瀑布过滤啊，那玩意不是养龟的，太扯了。<br>不要过于频繁换自来水，尤其是幼龟，新水易刺激腐皮。<br>当然，像我这样NO3过高的也定然不是好的榜样。</p>
+]]></content>
+    </entry>
+    
+    <entry>
+      <title><![CDATA[国外龟缸的简单设计]]></title>
+      <url>http://yoursite.com/2012/02/11/20120211-%E5%9B%BD%E5%A4%96%E9%BE%9F%E7%BC%B8%E7%9A%84%E7%AE%80%E5%8D%95%E8%AE%BE%E8%AE%A1/</url>
+      <content type="html"><![CDATA[<p>最近看了许多龟友的龟缸设计。大受启发，所以开始google了一下，找了一些国外的龟缸设计。<br>今天就介绍一种简单的设计理念。对于已经知道的龟友，希望能够给予更多的讨论和建议。<br>下面开始：<br><img src="/2012/02/11/20120211-国外龟缸的简单设计/20120211-1.jpg" alt=""><br>石头装备，无论是卵石，砖石，还是什么东西，往缸里一堆，便构成了晒台。这种设计的不如人意之处在于严重压缩了本来就不大的水体空间。<br><img src="/2012/02/11/20120211-国外龟缸的简单设计/20120211-2.jpg" alt=""><br>晒台装，晒台的优势在于，比起石头装，它释放了水体的空间。缺陷在于压缩了水面的空间，影响了龟在上水层游动时的范围。<br><img src="/2012/02/11/20120211-国外龟缸的简单设计/20120211-3.jpg" alt=""><br>水景装，其中以沉木为主打。造景本身需要空间，利用造景的实体作为晒台，就能很好的与美结合。<br>水景装是用的最多的。但是今天要介绍的是一种利用纵向空间布置的龟缸，如下:<br><img src="/2012/02/11/20120211-国外龟缸的简单设计/20120211-4.jpg" alt=""><br>我也不知道怎么称呼这种设计，它很好的利用了上下空间，把陆地和水体分离。<br>除了上陆地的那个横截面被阻挡之外，整个水体的空间得以保存。<br>此外，充分利用缸体的大小，延展了陆地部分的空间，需要的还可以设计龟巢。<br>改龟友的设计灯源用了2跟节能灯，和一个日晒等。从而保证陆地和水面的光线。<br><img src="/2012/02/11/20120211-国外龟缸的简单设计/20120211-5.jpg" alt=""><br>图片展示的是深水养龟，当然根据大家养龟的品种不同，可以自由选择水位高低。<br>延展的水体里，适当的可以养一些鱼。也许会活不长。<br><img src="/2012/02/11/20120211-国外龟缸的简单设计/20120211-6.jpg" alt=""><br>上陆部分用的一般的柔性网孔布，应该不难做到。<br>国内的龟友很多都是整理箱控。但无论你玻璃缸控还是什么控，一旦理念形成，设计也就应运而生。<br>献给每一位整理箱控，包括本人。<br><img src="/2012/02/11/20120211-国外龟缸的简单设计/20120211-7.jpg" alt=""><br>整理箱组合，分离陆地和水体空间。原理还是那个不变的原理。<br>个人觉得瀑布过滤效果不佳。相信这位龟友是为了制约成本。<br>推荐滤筒，不要因过滤而压缩了水体的空间。<br>水中放一点沉木或者植物，让龟的运动不在直来直去，这可以增加行程的距离感（相对走直线而言）。<br><img src="/2012/02/11/20120211-国外龟缸的简单设计/20120211-8.jpg" alt=""><br>组合装的侧视图。<br>如果你想更进一步，布置一个更漂亮的龟巢。见下。<br><img src="/2012/02/11/20120211-国外龟缸的简单设计/20120211-9.jpg" alt=""><br>简单组合。表面上仅仅就比我的整理箱多了一个龟窝，但冲设计上，这是一个理念的突破。<br><img src="/2012/02/11/20120211-国外龟缸的简单设计/20120211-10.jpg" alt=""><br><img src="/2012/02/11/20120211-国外龟缸的简单设计/20120211-11.jpg" alt=""><br><img src="/2012/02/11/20120211-国外龟缸的简单设计/20120211-12.jpg" alt=""><br>龟巢和龟台的区别在于内部，它的内部放了什么我也不知道。相信懂龟的朋友们一定更清楚。<br>最后，希望每一位龟友都能设计一个让龟舒适的窝，同时又不会影响自己家里的生活空间！<br><img src="/2012/02/11/20120211-国外龟缸的简单设计/20120211-13.jpg" alt=""></p>
+]]></content>
+    </entry>
+    
+    <entry>
+      <title><![CDATA[办公室养龟]]></title>
+      <url>http://yoursite.com/2011/12/03/20111203-%E5%8A%9E%E5%85%AC%E5%AE%A4%E5%85%BB%E9%BE%9F/</url>
+      <content type="html"><![CDATA[<p>宿舍实在寒冷，小小的感冒反反复复。太心疼了，不忍心让它这么带病冬眠了。<br>只能把小小和大大带到办公室里，让它们一起陪着我白天做研究。<br>正好我的位置也是靠窗，晒太阳方便，。<br>这个小水缸、加热棒和浮台都是在淘宝上新买的。总不能吧宿舍里的大行李箱搬到办公桌上吧。<br>过滤是CY-20；加热棒是阿诺比的26度精控；浮台你懂得；水缸是阿诺比的E-340；这套装备在龟龟们现在这个年龄段，应该还能凑活过个冬天。<br>照片是 HTC的 G10 自带摄像头，为这个冬天留下一个瞬间，咔，咔，咔。</p>
+<p><img src="/2011/12/03/20111203-办公室养龟/20111203-1.jpg" alt=""><br><img src="/2011/12/03/20111203-办公室养龟/20111203-2.jpg" alt=""><br><img src="/2011/12/03/20111203-办公室养龟/20111203-3.jpg" alt=""><br><img src="/2011/12/03/20111203-办公室养龟/20111203-4.jpg" alt=""><br><img src="/2011/12/03/20111203-办公室养龟/20111203-5.jpg" alt=""><br><img src="/2011/12/03/20111203-办公室养龟/20111203-6.jpg" alt=""><br><img src="/2011/12/03/20111203-办公室养龟/20111203-7.jpg" alt=""></p>
+]]></content>
+    </entry>
+    
+  
+  
+</search>
